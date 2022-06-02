@@ -167,7 +167,7 @@ DWORD ChildThreadHandler(void* parameter)
 	
 	while (true)
 	{
-		printf("%d\n", ++counter);
+		//printf("%d\n", ++counter);
 	}
 	return 0;
 }
