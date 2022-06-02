@@ -11,7 +11,7 @@ void SignalHandler(int);
 
 bool CreateChildProcess(PROCESS_INFORMATION* info, char* argv)
 {
-	DWORD flags = CREATE_SUSPENDED | CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB;
+	DWORD flags = CREATE_SUSPENDED | CREATE_NEW_CONSOLE | HIGH_PRIORITY_CLASS | CREATE_BREAKAWAY_FROM_JOB;
 	memset(info, 0, sizeof(PROCESS_INFORMATION));
 	STARTUPINFO si;
 	ZeroMemory(&si, sizeof(si));
@@ -46,6 +46,10 @@ static struct CHILD_PROCESS_WRAPPER {
 
 int main(int argc, char const* argv[])
 {
+	JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobExtendedLimitInfo;
+	BOOL jobContained = 0;
+	char cmd[512];
+
 	if (argc <= 1) exit(-1);
 
 	if (strstr(argv[argc - 1], "child_process") != NULL)
@@ -65,11 +69,25 @@ int main(int argc, char const* argv[])
 			exit(0);
 		}
 
-		char cmd[512];
 		memset(cmd, 0, 512);
-
 		ZeroMemory(PROCESS.INFO, sizeof(PROCESS.INFO));
-		BOOL jobContained = 0;
+
+		if (!AssignProcessToJobObject(PROCESS.JOB_OBJECT_HANDLE, GetCurrentProcess())) {
+			printf("Can not assign all child process to this Job Object\n");
+			CloseHandle(PROCESS.JOB_OBJECT_HANDLE);
+			exit(0);
+		}
+
+		memset(&jobExtendedLimitInfo, 0, sizeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+		memset(&jobExtendedLimitInfo.BasicLimitInformation, 0, sizeof(JOBOBJECT_BASIC_LIMIT_INFORMATION));
+		jobExtendedLimitInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+		if (!SetInformationJobObject(PROCESS.JOB_OBJECT_HANDLE, JobObjectExtendedLimitInformation, &jobExtendedLimitInfo, sizeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)))
+		{
+			printf("Failed to set job object information!\n");
+			CloseHandle(PROCESS.JOB_OBJECT_HANDLE);
+			exit(0);
+		}
+
 		for (int i = 0; i < sizeof(PROCESS.INFO) / sizeof(PROCESS_INFORMATION); i++)
 		{
 			sprintf(cmd, "main.exe %d child_process", i);
@@ -94,17 +112,20 @@ int main(int argc, char const* argv[])
 						}
 						else
 						{
+							printf("Resume child process\n");
 							ResumeThread(PROCESS.INFO[i].hThread);
 						}
 					}
 					else
 					{
 						printf("Current Job Object contained child process %d\n", PROCESS.INFO[i].dwProcessId);
+						ResumeThread(PROCESS.INFO[i].hThread);
 					}
 				}
 			}
 		}
 		// Wait until child process exits.
+		printf("Waiting for child process\n");
 		WaitForSingleObject(PROCESS.JOB_OBJECT_HANDLE, INFINITE);
 		TerminateJobObject(PROCESS.JOB_OBJECT_HANDLE, 0);
 		CloseHandle(PROCESS.JOB_OBJECT_HANDLE);
